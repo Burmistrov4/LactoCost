@@ -1,0 +1,49 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# --- Entornos y secretos ---
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Bases de datos locales ---
+instance/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+# Las migraciones SQL del proyecto SÍ se versionan: no ignorar *.sql.
+
+# --- Node / Cloudflare ---
+node_modules/
+.wrangler/
+.wrangler.toml.bak
+dist/
+build/
+.npm/
+*.tsbuildinfo
+
+# --- Logs y temporales del sistema ---
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+
+# --- Documento fuente local ---
+# PDF con registros de compras reales y cifras comerciales del propietario.
+# No se publica en el repositorio público; ver docs/20 para la auditoría.
+Estudio de Mercado de Yogures en Valencia.pdf

@@ -1,0 +1,14 @@
+{
+  "name": "yogurt-cloudflare-d1-spike",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Prototipo local para evaluar Cloudflare Workers + D1; no es la aplicación de negocio.",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
