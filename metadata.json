@@ -1,0 +1,8 @@
+{
+  "name": "LactoCost",
+  "description": "Panel inteligente de costos, inventario, producción y rentabilidad para derivados lácteos (yogurt y quesillo).",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
