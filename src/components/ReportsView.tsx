@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { InventoryMovement, InventoryItem, Product, ViewId } from '../types';
-import { money, downloadCSV } from '../utils/formatters';
+import { InventoryMovement, InventoryItem, Product, Sale, ViewId } from '../types';
+import { moneyUSD, moneyVES, downloadCSV } from '../utils/formatters';
 import { calculateTargetPrice } from '../domain/pricing';
 
 interface ReportsViewProps {
   movements: InventoryMovement[];
   inventory: InventoryItem[];
   products: Product[];
+  sales: Sale[];
+  activeRate: number;
+  activeRateName: string;
   onNavigate: (view: ViewId) => void;
   onNotify: (msg: string) => void;
 }
@@ -15,6 +18,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   movements,
   inventory,
   products,
+  sales,
+  activeRate,
+  activeRateName,
   onNavigate,
   onNotify,
 }) => {
@@ -26,13 +32,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   });
 
   const exportInventoryCSV = () => {
-    const headers = 'Código,Nombre,Categoría,Stock Actual,Unidad,CPP (VES),Valor Total (VES),Ubicación\n';
+    const headers = 'Código,Nombre,Categoría,Stock Actual,Unidad,Costo Unit ($),Costo Unit (VES),Valor Total ($),Ubicación,Proveedor\n';
     const rows = inventory
       .map(
         (i) =>
-          `"${i.code}","${i.name}","${i.category}",${i.currentStock},"${i.unit}",${i.unitCost},${
-            i.currentStock * i.unitCost
-          },"${i.location}"`
+          `"${i.code}","${i.name}","${i.category}",${i.currentStock},"${i.unit}",${i.unitCostUSD},${
+            i.unitCostUSD * activeRate
+          },${i.currentStock * i.unitCostUSD},"${i.location}","${i.supplier || ''}"`
       )
       .join('\n');
     downloadCSV(`lactocost_inventario_${new Date().toISOString().slice(0, 10)}.csv`, headers + rows);
@@ -40,11 +46,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const exportMovementsCSV = () => {
-    const headers = 'Fecha,Tipo,Referencia,Insumo,Cantidad,Unidad,Costo Unitario,Total,Moneda,Operador,Motivo\n';
+    const headers = 'Fecha,Tipo,Referencia,Insumo,Cantidad,Unidad,Costo Unit ($),Total ($),Tasa Aplicada,Total (VES),Operador,Motivo\n';
     const rows = movements
       .map(
         (m) =>
-          `"${m.date}","${m.type}","${m.reference}","${m.itemName}",${m.quantityDelta},"${m.unit}",${m.unitCost},${m.totalCost},"${m.currency}","${m.actor}","${m.reason}"`
+          `"${m.date}","${m.type}","${m.reference}","${m.itemName}",${m.quantityDelta},"${m.unit}",${m.unitCostUSD},${m.totalCostUSD},${m.exchangeRateUsed},${m.totalCostVES},"${m.actor}","${m.reason}"`
       )
       .join('\n');
     downloadCSV(`lactocost_operaciones_${new Date().toISOString().slice(0, 10)}.csv`, headers + rows);
@@ -52,17 +58,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const exportPricingCSV = () => {
-    const headers = 'Producto,Formato,Costo Variable (VES),Margen Objetivo (%),Precio Neto Sugerido (VES),IVA (%),Precio Cliente (VES)\n';
+    const headers = 'Producto,Formato,Costo Base ($),Margen (%),Precio Sugerido ($),Precio en Bolívares (VES),Tasa Referencia\n';
     const rows = products
       .map((p) => {
-        const calc = calculateTargetPrice(p.cost, p.targetMargin, {
-          taxRatePercent: p.taxRate || 0,
-        });
-        return `"${p.name}","${p.format}",${p.cost},${p.targetMargin},${calc.netPrice},${p.taxRate || 0},${calc.customerPrice}`;
+        const calc = calculateTargetPrice(p.costUSD, p.targetMargin, { exchangeRate: activeRate });
+        return `"${p.name}","${p.format}",${p.costUSD},${p.targetMargin},${calc.netPriceUSD},${calc.netPriceVES},"${activeRateName}"`;
       })
       .join('\n');
     downloadCSV(`lactocost_precios_${new Date().toISOString().slice(0, 10)}.csv`, headers + rows);
     onNotify('Catálogo de precios y rentabilidad exportado como CSV.');
+  };
+
+  const exportSalesCSV = () => {
+    const headers = 'ID Venta,Fecha,Cliente,Total ($),Tasa Aplicada,Tipo Tasa,Total (VES),Método de Pago,Notas\n';
+    const rows = sales
+      .map(
+        (s) =>
+          `"${s.id}","${s.date}","${s.clientName}",${s.totalUSD},${s.rateApplied},"${s.rateType}",${s.totalVES},"${s.paymentMethod}","${s.notes || ''}"`
+      )
+      .join('\n');
+    downloadCSV(`lactocost_ventas_${new Date().toISOString().slice(0, 10)}.csv`, headers + rows);
+    onNotify('Historial de ventas exportado como CSV exitosamente.');
   };
 
   return (
@@ -70,17 +86,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       <div className="card panel">
         <div className="panel-title">
           <div>
-            <h2 style={{ margin: 0, fontSize: '19px' }}>Informes y auditoría de operaciones</h2>
+            <h2 style={{ margin: 0, fontSize: '19px' }}>Informes y Auditoría de Operaciones</h2>
             <p>
-              Trazabilidad de movimientos de almacén, valoraciones a costo promedio y exportación en formatos estándar.
+              Trazabilidad en <b>Dólares ($ USD)</b> y <b>Bolívares</b> al cambio de {activeRateName} ({moneyVES(activeRate)}).
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button className="ghost-btn" onClick={exportInventoryCSV}>
               ↓ CSV Inventario
             </button>
             <button className="ghost-btn" onClick={exportPricingCSV}>
               ↓ CSV Precios
+            </button>
+            <button className="ghost-btn" onClick={exportSalesCSV}>
+              ↓ CSV Ventas
             </button>
             <button className="primary-btn" onClick={exportMovementsCSV}>
               ↓ CSV Operaciones
@@ -88,15 +107,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-        <div className="pricing-intro">
-          <div className="insight-icon" style={{ background: '#d6eeb9', flex: 'none' }}>
+        <div className="pricing-intro" style={{ background: '#f5faf4', borderColor: '#d0ebd5' }}>
+          <div className="insight-icon" style={{ background: '#d6fb72', color: 'var(--deep)' }}>
             ▤
           </div>
           <div>
-            <strong>Pistas de auditoría inmutables</strong>
+            <strong>Transparencia contable en doble moneda</strong>
             <p>
-              Cada recepción, consumo en lote o ajuste físico conserva el identificador de operación, la fecha y hora,
-              el operador responsable y la moneda de valoración utilizada.
+              Cada informe refleja el valor en dólares como base de reposición y su contrapartida en bolívares calculada
+              según la tasa del día de la operación.
             </p>
           </div>
         </div>
@@ -131,7 +150,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
 
             <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
-              Mostrando {filteredMovements.length} registros
+              Mostrando {filteredMovements.length} movimientos
             </div>
           </div>
 
@@ -144,8 +163,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <th>Referencia</th>
                   <th>Descripción / Ítem</th>
                   <th>Variación Cantidad</th>
-                  <th>Costo Unit.</th>
-                  <th>Importe Total</th>
+                  <th>Costo ($)</th>
+                  <th>Total ($)</th>
+                  <th>Total (Bs)</th>
                   <th>Operador</th>
                   <th>Motivo / Lote</th>
                 </tr>
@@ -195,9 +215,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         {m.quantityDelta > 0 ? `+${m.quantityDelta}` : m.quantityDelta} {m.unit}
                       </strong>
                     </td>
-                    <td>{money(m.unitCost, m.currency)}</td>
+                    <td>{moneyUSD(m.unitCostUSD)}</td>
                     <td>
-                      <b>{money(m.totalCost, m.currency)}</b>
+                      <b>{moneyUSD(m.totalCostUSD)}</b>
+                    </td>
+                    <td>
+                      <small style={{ color: '#5b6b60' }}>{moneyVES(m.totalCostVES)}</small>
                     </td>
                     <td>
                       <small style={{ color: '#687870' }}>{m.actor}</small>

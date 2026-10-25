@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { InventoryItem, InventoryMovement } from '../types';
 import { movingAverageReceipt } from '../domain/costing';
+import { moneyUSD, moneyVES } from '../utils/formatters';
 
 interface NewOperationModalProps {
   isOpen: boolean;
   onClose: () => void;
   inventory: InventoryItem[];
+  activeRate: number;
   onSaveOperation: (movement: InventoryMovement, updatedItem?: InventoryItem) => void;
   onNotify: (msg: string) => void;
 }
@@ -14,17 +16,23 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
   isOpen,
   onClose,
   inventory,
+  activeRate,
   onSaveOperation,
   onNotify,
 }) => {
   const [operationType, setOperationType] = useState<'receipt' | 'consumption' | 'waste' | 'adjustment'>('receipt');
   const [selectedItemId, setSelectedItemId] = useState<string>(inventory[0]?.id || '');
-  const [quantity, setQuantity] = useState<number>(100);
-  const [unitCost, setUnitCost] = useState<number>(38.5);
-  const [freightCharges, setFreightCharges] = useState<number>(0);
+  const [quantity, setQuantity] = useState<number>(50);
+  const [unitCostUSD, setUnitCostUSD] = useState<number>(0.85);
+  const [freightUSD, setFreightUSD] = useState<number>(0);
   const [reference, setReference] = useState<string>('REC-0025');
-  const [reason, setReason] = useState<string>('Recepción ordinaria de proveedor');
-  const [actor, setActor] = useState<string>('operador@lactocost.local');
+  const [reason, setReason] = useState<string>('Compra semanal de insumo');
+  const [actor, setActor] = useState<string>('emprendedora@lactocost.local');
+
+  // Helper for Establishment Purchase (BCV + IVA 16%)
+  const [isEstablishmentPurchase, setIsEstablishmentPurchase] = useState<boolean>(false);
+  const [invoiceVES, setInvoiceVES] = useState<number>(0);
+  const [stripIVA, setStripIVA] = useState<boolean>(true);
 
   if (!isOpen) return null;
 
@@ -32,7 +40,6 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!currentItem) return;
     if (quantity <= 0) {
       onNotify('La cantidad debe ser mayor que cero.');
@@ -41,29 +48,28 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
 
     const isPositive = operationType === 'receipt';
     const quantityDelta = isPositive ? quantity : -quantity;
-    let finalUnitCost = unitCost;
-    let totalCost = quantity * unitCost;
+    let finalUnitCostUSD = unitCostUSD;
+    let totalCostUSD = quantity * unitCostUSD;
     let updatedItem: InventoryItem | undefined;
 
     if (operationType === 'receipt') {
-      // Apply moving average receipt calculation
       try {
         const cppResult = movingAverageReceipt(
           currentItem.currentStock,
-          currentItem.unitCost,
+          currentItem.unitCostUSD,
           quantity,
-          quantity * unitCost,
-          freightCharges,
+          quantity * unitCostUSD,
+          freightUSD,
           0
         );
 
-        finalUnitCost = cppResult.newAverageCost;
-        totalCost = cppResult.receiptValue;
+        finalUnitCostUSD = cppResult.newAverageCost;
+        totalCostUSD = cppResult.receiptValue;
 
         updatedItem = {
           ...currentItem,
           currentStock: cppResult.endingQuantity,
-          unitCost: cppResult.newAverageCost,
+          unitCostUSD: cppResult.newAverageCost,
           status:
             cppResult.endingQuantity <= currentItem.safetyStock
               ? 'bad'
@@ -76,14 +82,13 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
         return;
       }
     } else {
-      // Consumption or waste
       if (currentItem.currentStock < quantity) {
-        onNotify('Advertencia: El stock resultante quedaría en saldo negativo.');
+        onNotify('Advertencia: El stock en almacén quedaría negativo.');
         return;
       }
 
-      finalUnitCost = currentItem.unitCost;
-      totalCost = quantity * finalUnitCost;
+      finalUnitCostUSD = currentItem.unitCostUSD;
+      totalCostUSD = quantity * finalUnitCostUSD;
       const endingStock = currentItem.currentStock - quantity;
 
       updatedItem = {
@@ -98,6 +103,8 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
       };
     }
 
+    const totalCostVES = Math.round((totalCostUSD * activeRate + Number.EPSILON) * 100) / 100;
+
     const newMovement: InventoryMovement = {
       id: `mov-${Date.now()}`,
       date: 'Hoy · Justo ahora',
@@ -107,9 +114,10 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
       itemName: `${operationType === 'receipt' ? 'Recepción' : operationType === 'waste' ? 'Merma' : 'Consumo'} ${currentItem.name}`,
       quantityDelta,
       unit: currentItem.unit,
-      unitCost: finalUnitCost,
-      totalCost,
-      currency: currentItem.currency,
+      unitCostUSD: finalUnitCostUSD,
+      totalCostUSD,
+      exchangeRateUsed: activeRate,
+      totalCostVES,
       status: 'good',
       statusText: 'Registrada',
       actor,
@@ -117,7 +125,9 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
     };
 
     onSaveOperation(newMovement, updatedItem);
-    onNotify(`Operación registrada exitosamente: ${currentItem.name} (${quantityDelta > 0 ? `+${quantityDelta}` : quantityDelta} ${currentItem.unit}).`);
+    onNotify(
+      `Operación registrada: ${currentItem.name} (${quantityDelta > 0 ? `+${quantityDelta}` : quantityDelta} ${currentItem.unit}) por ${moneyUSD(totalCostUSD)} (${moneyVES(totalCostVES)}).`
+    );
     onClose();
   };
 
@@ -126,30 +136,30 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <h2>Registrar nueva operación</h2>
-            <p>Movimiento de inventario con integración automática a costos y CPP.</p>
+            <h2>Registrar Operación de Almacén</h2>
+            <p>Ingresa compras o consumos en dólares con cálculo automático de CPP.</p>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar modal">
+          <button className="modal-close" onClick={onClose}>
             ✕
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="form-grid">
           <div className="form-field">
-            <label>Tipo de operación</label>
+            <label>Tipo de movimiento</label>
             <select
               value={operationType}
               onChange={(e) => {
-                const t = e.target.value as 'receipt' | 'consumption' | 'waste' | 'adjustment';
+                const t = e.target.value as any;
                 setOperationType(t);
                 if (t === 'receipt') setReference(`REC-${Math.floor(1000 + Math.random() * 9000)}`);
                 else if (t === 'waste') setReference(`MER-${Math.floor(1000 + Math.random() * 9000)}`);
                 else setReference(`CON-${Math.floor(1000 + Math.random() * 9000)}`);
               }}
             >
-              <option value="receipt">Recepción de compra (+ entrada a CPP)</option>
-              <option value="consumption">Consumo para producción (- salida a CPP vigente)</option>
-              <option value="waste">Merma / Descarte (- salida sin valorizar)</option>
+              <option value="receipt">Entrada de compra (+ suma a inventario)</option>
+              <option value="consumption">Consumo para lote (- deducción de stock)</option>
+              <option value="waste">Merma / Descarte (- producto dañado o vencido)</option>
               <option value="adjustment">Ajuste de inventario físico</option>
             </select>
           </div>
@@ -160,63 +170,133 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
               value={selectedItemId}
               onChange={(e) => {
                 setSelectedItemId(e.target.value);
-                const item = inventory.find((i) => i.id === e.target.value);
-                if (item) setUnitCost(item.unitCost);
+                const it = inventory.find((i) => i.id === e.target.value);
+                if (it) setUnitCostUSD(it.unitCostUSD);
               }}
             >
               {inventory.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name} ({item.code}) · Actual: {item.currentStock} {item.unit}
+                  {item.name} ({item.code}) · Stock actual: {item.currentStock} {item.unit}
                 </option>
               ))}
             </select>
           </div>
+
+          {/* Establishment Purchase Helper (BCV + IVA) */}
+          {operationType === 'receipt' && (
+            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '10px 12px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#1e293b', cursor: 'pointer', margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={isEstablishmentPurchase}
+                    onChange={(e) => setIsEstablishmentPurchase(e.target.checked)}
+                  />
+                  <span>🛒 Compré en establecimiento (Factura en Bs. con IVA 16% a Tasa Oficial BCV)</span>
+                </label>
+              </div>
+
+              {isEstablishmentPurchase && (
+                <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                      Monto total factura (Bs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Ej. 1250"
+                      value={invoiceVES || ''}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setInvoiceVES(val);
+                        if (quantity > 0 && activeRate > 0) {
+                          const netVES = stripIVA ? val / 1.16 : val;
+                          const netUSD = netVES / activeRate / quantity;
+                          setUnitCostUSD(Math.round((netUSD + Number.EPSILON) * 1000) / 1000);
+                        }
+                      }}
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '16px' }}>
+                    <input
+                      type="checkbox"
+                      id="stripIVA"
+                      checked={stripIVA}
+                      onChange={(e) => {
+                        setStripIVA(e.target.checked);
+                        if (invoiceVES > 0 && quantity > 0 && activeRate > 0) {
+                          const netVES = e.target.checked ? invoiceVES / 1.16 : invoiceVES;
+                          const netUSD = netVES / activeRate / quantity;
+                          setUnitCostUSD(Math.round((netUSD + Number.EPSILON) * 1000) / 1000);
+                        }
+                      }}
+                    />
+                    <label htmlFor="stripIVA" style={{ fontSize: '11px', color: '#334155', cursor: 'pointer' }}>
+                      Desglosar IVA 16% (Costo base sin impuesto)
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="form-row">
             <div className="form-field">
               <label>Cantidad ({currentItem?.unit})</label>
               <input
                 type="number"
-                min="0.1"
-                step="0.1"
+                min="0.001"
+                step="any"
                 required
                 value={quantity}
-                onChange={(e) => setQuantity(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const q = parseFloat(e.target.value) || 0;
+                  setQuantity(q);
+                  if (isEstablishmentPurchase && invoiceVES > 0 && q > 0 && activeRate > 0) {
+                    const netVES = stripIVA ? invoiceVES / 1.16 : invoiceVES;
+                    const netUSD = netVES / activeRate / q;
+                    setUnitCostUSD(Math.round((netUSD + Number.EPSILON) * 1000) / 1000);
+                  }
+                }}
               />
             </div>
 
             <div className="form-field">
-              <label>
-                {operationType === 'receipt' ? 'Costo unitario compra (Bs.)' : 'CPP vigente (Bs.)'}
-              </label>
+              <label>{operationType === 'receipt' ? 'Costo unitario compra ($ USD)' : 'Costo actual ($ USD)'}</label>
               <input
                 type="number"
                 min="0"
-                step="0.01"
+                step="0.001"
                 required
                 disabled={operationType !== 'receipt'}
-                value={unitCost}
-                onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
+                value={unitCostUSD}
+                onChange={(e) => setUnitCostUSD(parseFloat(e.target.value) || 0)}
               />
+              <small style={{ color: 'var(--muted)', fontSize: '10px' }}>
+                En Bs: {moneyVES(unitCostUSD * activeRate)} / {currentItem?.unit}
+              </small>
             </div>
           </div>
 
           {operationType === 'receipt' && (
             <div className="form-field">
-              <label>Cargos atribuibles adicionales (Flete / Embalaje en Bs.)</label>
+              <label>Flete / Transporte adicional ($ USD)</label>
               <input
                 type="number"
                 min="0"
-                step="1"
-                value={freightCharges}
-                onChange={(e) => setFreightCharges(parseFloat(e.target.value) || 0)}
+                step="0.1"
+                value={freightUSD}
+                onChange={(e) => setFreightUSD(parseFloat(e.target.value) || 0)}
               />
             </div>
           )}
 
           <div className="form-row">
             <div className="form-field">
-              <label>Código de referencia / Documento</label>
+              <label>Número de factura / Referencia</label>
               <input
                 type="text"
                 required
@@ -226,7 +306,7 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
             </div>
 
             <div className="form-field">
-              <label>Operador responsable</label>
+              <label>Responsable</label>
               <input
                 type="text"
                 required
@@ -237,7 +317,7 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
           </div>
 
           <div className="form-field">
-            <label>Motivo o justificación</label>
+            <label>Motivo</label>
             <input
               type="text"
               required
@@ -251,7 +331,7 @@ export const NewOperationModal: React.FC<NewOperationModalProps> = ({
               Cancelar
             </button>
             <button type="submit" className="primary-btn">
-              Confirmar y aplicar movimiento
+              Confirmar Operación
             </button>
           </div>
         </form>

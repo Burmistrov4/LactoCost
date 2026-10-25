@@ -1,18 +1,21 @@
 import React, { useState } from 'react';
-import { Product, ViewId } from '../types';
-import { money } from '../utils/formatters';
+import { Product, ViewId, DisplayCurrencyMode, ScrapedRates } from '../types';
+import { moneyUSD, moneyVES } from '../utils/formatters';
 import { calculateTargetPrice } from '../domain/pricing';
 
 interface PricingViewProps {
   products: Product[];
-  onUpdateMargin: (productId: string, margin: number) => void;
+  rates: ScrapedRates;
+  activeRate: number;
+  activeRateName: string;
+  currencyMode: DisplayCurrencyMode;
   onUpdateProductParams: (
     productId: string,
     params: {
-      cost?: number;
+      costUSD?: number;
       margin?: number;
       variableFeeRate?: number;
-      fixedVariableCost?: number;
+      fixedVariableCostUSD?: number;
       taxRate?: number;
     }
   ) => void;
@@ -23,37 +26,34 @@ interface PricingViewProps {
 
 export const PricingView: React.FC<PricingViewProps> = ({
   products,
+  rates,
+  activeRate,
+  activeRateName,
   onUpdateProductParams,
   onResetMargins,
   onNavigate,
   onNotify,
 }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
+  const [activeTab, setActiveTab] = useState<'simple' | 'channels'>('simple');
 
   const handleMarginChange = (productId: string, rawValue: string) => {
-    const trimmed = rawValue.trim();
-    if (trimmed === '') {
-      setErrors((prev) => ({ ...prev, [productId]: 'Introduce un porcentaje válido.' }));
-      return;
-    }
-    const val = parseFloat(trimmed);
+    const val = parseFloat(rawValue);
     if (!Number.isFinite(val) || val < 0 || val >= 100) {
       setErrors((prev) => ({
         ...prev,
-        [productId]: 'El margen debe estar entre 0% y menos de 100%.',
+        [productId]: 'El margen debe estar entre 0% y 99%.',
       }));
       return;
     }
-
     setErrors((prev) => ({ ...prev, [productId]: '' }));
     onUpdateProductParams(productId, { margin: val });
   };
 
-  const handleCostChange = (productId: string, rawValue: string) => {
+  const handleCostUSDChange = (productId: string, rawValue: string) => {
     const val = parseFloat(rawValue);
     if (!Number.isFinite(val) || val < 0) return;
-    onUpdateProductParams(productId, { cost: val });
+    onUpdateProductParams(productId, { costUSD: val });
   };
 
   const handleFeeChange = (productId: string, rawValue: string) => {
@@ -62,20 +62,15 @@ export const PricingView: React.FC<PricingViewProps> = ({
     onUpdateProductParams(productId, { variableFeeRate: val });
   };
 
-  const handleTaxChange = (productId: string, rawValue: string) => {
-    const val = parseFloat(rawValue);
-    if (!Number.isFinite(val) || val < 0 || val > 100) return;
-    onUpdateProductParams(productId, { taxRate: val });
-  };
-
   return (
     <section className="view-state active" id="view-pricing">
       <div className="card panel">
         <div className="panel-title">
           <div>
-            <h2 style={{ margin: 0, fontSize: '19px' }}>Precios y márgenes por producto</h2>
+            <h2 style={{ margin: 0, fontSize: '19px' }}>Calculadora de Precios, Márgenes y Tasas</h2>
             <p>
-              Modifica el margen objetivo o los parámetros de canal y el precio sugerido se recalcula al instante.
+              Establece tus costos y márgenes en <b>Dólares ($ USD)</b>. El precio en <b>Bolívares</b> se recalcula al
+              instante comparando la <b>Tasa Euro</b> ({moneyVES(rates.bcvEur)}) frente a <b>Binance P2P USDT</b> ({moneyVES(rates.binanceP2PAvg)}).
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -84,44 +79,50 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 className={activeTab === 'simple' ? 'active' : ''}
                 onClick={() => setActiveTab('simple')}
               >
-                Modo básico
+                Vista Rápida
               </button>
               <button
-                className={activeTab === 'advanced' ? 'active' : ''}
-                onClick={() => setActiveTab('advanced')}
+                className={activeTab === 'channels' ? 'active' : ''}
+                onClick={() => setActiveTab('channels')}
               >
-                Canales & Impuestos
+                Comisiones por Canal
               </button>
             </div>
-            <span className="status good">MOTOR ACTIVO</span>
+            <span className="status good">TASA ACTIVA: {activeRateName}</span>
           </div>
         </div>
 
-        <div className="pricing-intro">
-          <div className="insight-icon" style={{ background: '#d6eeb9', flex: 'none' }}>
-            ↗
+        <div className="pricing-intro" style={{ background: '#f5faf4', borderColor: '#d3edd8' }}>
+          <div className="insight-icon" style={{ background: '#d6fb72', color: 'var(--deep)' }}>
+            💡
           </div>
           <div>
-            <strong>Margen sobre precio de venta, no recargo sobre costo</strong>
+            <strong>Margen real sobre precio de venta: <code>(Precio − Costo) ÷ Precio</code></strong>
             <p>
-              El margen se calcula como <code>(precio − costo) ÷ precio</code>. Cada producto puede tener un objetivo
-              diferente; el precio sugerido cambia automáticamente al editar su porcentaje.
+              En un negocio de yogurt y quesillo, el margen objetivo sugerido es de <b>35% a 45%</b> para cubrir
+              mermas, refrigeración constante y dejar una ganancia limpia para ti.
             </p>
           </div>
         </div>
 
         <div id="pricingGrid" className="pricing-grid">
           {products.map((product) => {
-            let calcResult;
-            try {
-              calcResult = calculateTargetPrice(product.cost, product.targetMargin, {
-                variableFeeRatePercent: product.variableFeeRate || 0,
-                fixedVariableCost: product.fixedVariableCost || 0,
-                taxRatePercent: product.taxRate || 0,
-              });
-            } catch (err: unknown) {
-              calcResult = null;
-            }
+            const pricingActive = calculateTargetPrice(product.costUSD, product.targetMargin, {
+              exchangeRate: activeRate,
+              variableFeeRatePercent: product.variableFeeRate || 0,
+              fixedVariableCostUSD: product.fixedVariableCostUSD || 0.05,
+              taxRatePercent: product.taxRate || 0,
+            });
+
+            // Compare Euro BCV vs Binance P2P
+            const pricingBCVEur = calculateTargetPrice(product.costUSD, product.targetMargin, {
+              exchangeRate: rates.bcvEur,
+            });
+            const pricingBinance = calculateTargetPrice(product.costUSD, product.targetMargin, {
+              exchangeRate: rates.binanceP2PAvg,
+            });
+
+            const diffVES = Math.abs(pricingBCVEur.netPriceVES - pricingBinance.netPriceVES);
 
             return (
               <article className="pricing-card" data-product={product.id} key={product.id}>
@@ -134,105 +135,107 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 </div>
 
                 <div className="price-metric">
-                  <small>Costo variable unitario</small>
-                  {activeTab === 'advanced' ? (
+                  <small>Costo variable unitario base ($ USD)</small>
+                  {activeTab === 'channels' ? (
                     <input
                       type="number"
-                      step="1"
+                      step="0.05"
                       min="0"
                       className="margin-input"
-                      value={product.cost}
-                      onChange={(e) => handleCostChange(product.id, e.target.value)}
+                      value={product.costUSD}
+                      onChange={(e) => handleCostUSDChange(product.id, e.target.value)}
                       style={{ marginTop: '4px', padding: '6px 8px', fontSize: '12px' }}
                     />
                   ) : (
-                    <strong>{money(product.cost)}</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '2px' }}>
+                      <strong style={{ fontSize: '15px' }}>{moneyUSD(product.costUSD)}</strong>
+                      <span style={{ fontSize: '11px', color: '#68786f' }}>
+                        {moneyVES(product.costUSD * activeRate)}
+                      </span>
+                    </div>
                   )}
                 </div>
 
                 <label className="field-label" htmlFor={`margin-${product.id}`}>
-                  Margen objetivo de rentabilidad
+                  Margen objetivo de ganancia
                 </label>
                 <div className="margin-input-wrap">
                   <input
                     className="margin-input"
                     id={`margin-${product.id}`}
-                    data-margin-for={product.id}
                     type="number"
-                    min="0"
-                    max="99.9"
+                    min="5"
+                    max="90"
                     step="0.5"
-                    inputMode="decimal"
                     value={product.targetMargin}
                     onChange={(e) => handleMarginChange(product.id, e.target.value)}
-                    aria-describedby={`error-${product.id}`}
                   />
                   <span>%</span>
                 </div>
-                <div className="calc-error" id={`error-${product.id}`} aria-live="polite">
+                <div className="calc-error" id={`error-${product.id}`}>
                   {errors[product.id] || ''}
                 </div>
 
-                {activeTab === 'advanced' && (
-                  <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <label className="field-label" style={{ margin: '4px 0 2px', fontSize: '10px' }}>
-                        Comisión canal (%)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="90"
-                        step="0.5"
-                        className="margin-input"
-                        style={{ padding: '6px 8px', fontSize: '11px' }}
-                        value={product.variableFeeRate || 0}
-                        onChange={(e) => handleFeeChange(product.id, e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label" style={{ margin: '4px 0 2px', fontSize: '10px' }}>
-                        IVA / Impuesto (%)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="50"
-                        step="1"
-                        className="margin-input"
-                        style={{ padding: '6px 8px', fontSize: '11px' }}
-                        value={product.taxRate || 0}
-                        onChange={(e) => handleTaxChange(product.id, e.target.value)}
-                      />
-                    </div>
+                {activeTab === 'channels' && (
+                  <div style={{ marginTop: '8px' }}>
+                    <label className="field-label" style={{ margin: '4px 0 2px', fontSize: '10px' }}>
+                      Comisión de canal o bodegón (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      step="1"
+                      className="margin-input"
+                      style={{ padding: '6px 8px', fontSize: '11px' }}
+                      value={product.variableFeeRate || 0}
+                      onChange={(e) => handleFeeChange(product.id, e.target.value)}
+                    />
                   </div>
                 )}
 
+                {/* Main Suggested Price in USD & Active Rate VES */}
                 <div className="price-result">
-                  <small>Precio sugerido neto</small>
+                  <small>Precio sugerido de venta</small>
                   <strong id={`price-${product.id}`}>
-                    {calcResult ? money(calcResult.netPrice) : '—'}
+                    {moneyUSD(pricingActive.netPriceUSD)}
                   </strong>
-                  {calcResult && (product.taxRate || 0) > 0 && (
-                    <small style={{ color: '#d6fb72', marginTop: '2px' }}>
-                      Precio final cliente (c/ IVA): {money(calcResult.customerPrice)}
-                    </small>
-                  )}
-                  <small>Se recalcula al cambiar el margen</small>
-                </div>
-
-                <div className="price-metrics">
-                  <div className="price-metric">
-                    <small>Contribución unitaria</small>
-                    <strong id={`contribution-${product.id}`}>
-                      {calcResult ? money(calcResult.contribution) : '—'}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', borderTop: '1px solid #ffffff25', paddingTop: '4px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--lime)', fontWeight: 700 }}>
+                      En Bolívares ({activeRateName}):
+                    </span>
+                    <strong style={{ fontSize: '14px', color: '#fff', margin: 0 }}>
+                      {moneyVES(pricingActive.netPriceVES)}
                     </strong>
                   </div>
+                </div>
+
+                {/* Comparison Box: Euro BCV vs Binance P2P */}
+                <div style={{ background: '#f8faf7', borderRadius: '10px', padding: '10px', marginTop: '10px', border: '1px solid #e4eae2', fontSize: '11px' }}>
+                  <span style={{ fontWeight: 750, color: '#385042', display: 'block', marginBottom: '6px' }}>
+                    Comparativa de tasas en mostrador:
+                  </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#55665b' }}>🇪🇺 Con Tasa Euro ({moneyVES(rates.bcvEur)}):</span>
+                    <b>{moneyVES(pricingBCVEur.netPriceVES)}</b>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#55665b' }}>🟡 Con Binance P2P ({moneyVES(rates.binanceP2PAvg)}):</span>
+                    <b>{moneyVES(pricingBinance.netPriceVES)}</b>
+                  </div>
+                  <div style={{ borderTop: '1px solid #e5ebe4', paddingTop: '4px', fontSize: '10px', color: '#66786c' }}>
+                    Diferencia entre referencias: <b>{moneyVES(diffVES)}</b> por unidad.
+                  </div>
+                </div>
+
+                <div className="price-metrics" style={{ marginTop: '8px' }}>
                   <div className="price-metric">
-                    <small>Margen resultante</small>
-                    <strong id={`result-margin-${product.id}`}>
-                      {calcResult ? `${calcResult.actualContributionMargin.toFixed(1)}%` : '—'}
-                    </strong>
+                    <small>Ganancia por pote</small>
+                    <strong style={{ color: '#26785c' }}>{moneyUSD(pricingActive.contributionUSD)}</strong>
+                  </div>
+                  <div className="price-metric">
+                    <small>Margen real</small>
+                    <strong>{pricingActive.actualContributionMargin.toFixed(1)}%</strong>
                   </div>
                 </div>
               </article>
@@ -241,29 +244,29 @@ export const PricingView: React.FC<PricingViewProps> = ({
         </div>
 
         <div className="formula-note">
-          <b>Fórmula de rentabilidad neta:</b> <code>precio sugerido = (costo variable + costo fijo) ÷ (1 − margen − comisión)</code>.
-          Ejemplo: costo Bs. 820 con margen 35% → Bs. 1.261,54. Toda la aritmética se computa con precisión financiera sin aproximaciones arbitrarias.
+          <b>Fórmula financiera determinista:</b> <code>Precio = (Costo en $ + Costo fijo) ÷ (1 − Margen % − Comisión %)</code>.
+          Posteriormente se convierte a Bolívares multiplicando por la <b>Tasa Euro</b> o <b>Binance P2P</b> seleccionada.
         </div>
 
         <div className="pricing-footer">
-          <p>Los parámetros modificados se reflejan inmediatamente en el Radar de rentabilidad del Dashboard.</p>
+          <p>Los precios calculados se sincronizan automáticamente con el generador de mensajes de WhatsApp.</p>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               id="resetMargins"
               type="button"
               onClick={() => {
                 onResetMargins();
-                onNotify('Márgenes de rentabilidad restablecidos a 35%.');
+                onNotify('Márgenes restablecidos a 35% en todos los productos.');
               }}
             >
-              Restablecer márgenes demo
+              Restablecer márgenes
             </button>
             <button
               type="button"
-              style={{ background: '#eaf4eb', borderColor: '#bcd8c2', color: '#276346' }}
-              onClick={() => onNotify('Configuración de precios aplicada en memoria correctamente.')}
+              className="primary-btn"
+              onClick={() => onNavigate('growth')}
             >
-              Guardar política activa
+              Generar Menú WhatsApp ↗
             </button>
           </div>
         </div>

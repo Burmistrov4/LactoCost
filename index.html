@@ -2,15 +2,81 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#101c19" />
-  <title>LactoCost · Panel de control</title>
-  <meta name="description" content="Panel inteligente de costos, inventario, producción y rentabilidad para derivados lácteos (yogurt y quesillo)." />
-  <meta property="og:title" content="LactoCost · Panel de control" />
-  <meta property="og:description" content="Panel inteligente de costos, inventario, producción y rentabilidad para derivados lácteos (yogurt y quesillo)." />
+  <script>
+    /* Compatibility patch for Chrome extensions and interceptors */
+    (function() {
+      try {
+        var rawFetch = window.fetch;
+        var boundFetch = rawFetch ? function() {
+          return rawFetch.apply(window, arguments);
+        } : null;
+        var activeFetch = boundFetch;
+
+        Object.defineProperty(window, 'fetch', {
+          configurable: true,
+          enumerable: true,
+          get: function() {
+            return activeFetch;
+          },
+          set: function(fn) {
+            activeFetch = fn;
+          }
+        });
+      } catch (e) {
+        try {
+          Object.defineProperty(Window.prototype, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+              return activeFetch;
+            },
+            set: function(fn) {
+              activeFetch = fn;
+            }
+          });
+        } catch (_) {}
+      }
+
+      window.addEventListener('error', function(event) {
+        if (event && (
+          (event.filename && event.filename.indexOf('chrome-extension://') !== -1) ||
+          (event.message && (
+            event.message.indexOf('Cannot set property fetch') !== -1 ||
+            event.message.indexOf('chrome-extension') !== -1
+          ))
+        )) {
+          event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event && event.reason;
+        var stack = (reason && reason.stack) || (reason && reason.message) || '';
+        if (typeof stack === 'string' && (
+          stack.indexOf('chrome-extension://') !== -1 ||
+          stack.indexOf('Cannot set property fetch') !== -1
+        )) {
+          event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        }
+      });
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#12201b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>CostoProfit · Control Financiero & Costos Artesanales</title>
+  <meta name="description" content="CostoProfit: Sistema integral de costos reales (CPP), márgenes y fijación de precios bi-monetarios (USD/VES con tasa BCV y Binance P2P), recetas y punto de venta para talleres gastronómicos y artesanales." />
+  <meta property="og:title" content="CostoProfit · Control Financiero & Costos Artesanales" />
+  <meta property="og:description" content="CostoProfit: Sistema integral de costos reales (CPP), márgenes y fijación de precios bi-monetarios (USD/VES con tasa BCV y Binance P2P), recetas y punto de venta para talleres gastronómicos y artesanales." />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Outfit:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="root"></div>

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { InventoryItem, ViewId } from '../types';
-import { money } from '../utils/formatters';
+import { moneyUSD, moneyVES } from '../utils/formatters';
 import { suggestedPurchaseQuantity } from '../domain/costing';
 
 interface PurchasesViewProps {
   inventory: InventoryItem[];
+  activeRate: number;
+  activeRateName: string;
   onNavigate: (view: ViewId) => void;
   onOpenNewOperation: () => void;
   onNotify: (msg: string) => void;
@@ -12,6 +14,8 @@ interface PurchasesViewProps {
 
 export const PurchasesView: React.FC<PurchasesViewProps> = ({
   inventory,
+  activeRate,
+  activeRateName,
   onNavigate,
   onOpenNewOperation,
   onNotify,
@@ -44,18 +48,21 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
     confirmedInbound
   );
 
-  const estimatedOrderCost = suggestedQty * (selectedItem ? selectedItem.unitCost : 0);
+  const estimatedOrderCostUSD = suggestedQty * (selectedItem ? selectedItem.unitCostUSD : 0);
+  const estimatedOrderCostVES = estimatedOrderCostUSD * activeRate;
 
-  // Auto-calculated replenishment table for critical and warning items
+  // Replenishment items
   const replenishmentItems = inventory
     .filter((i) => i.currentStock <= i.minStock)
     .map((item) => {
       const needed = Math.max(0, item.minStock * 1.5 - item.currentStock);
-      const estCost = needed * item.unitCost;
+      const estCostUSD = needed * item.unitCostUSD;
+      const estCostVES = estCostUSD * activeRate;
       return {
         ...item,
         needed,
-        estCost,
+        estCostUSD,
+        estCostVES,
       };
     });
 
@@ -64,9 +71,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       <div className="card panel">
         <div className="panel-title">
           <div>
-            <h2 style={{ margin: 0, fontSize: '19px' }}>Planificación de compras sugeridas</h2>
+            <h2 style={{ margin: 0, fontSize: '19px' }}>Planificación de Compras Sugeridas</h2>
             <p>
-              Cálculo riguroso de cobertura según plazo de entrega, stock de seguridad y demanda comprometida.
+              Evita quedarte sin leche o envases un fin de semana. Costeo de órdenes en <b>Dólares ($ USD)</b> y <b>Bolívares</b> ({activeRateName}: {moneyVES(activeRate)}).
             </p>
           </div>
           <button className="primary-btn" onClick={onOpenNewOperation}>
@@ -74,33 +81,24 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           </button>
         </div>
 
-        <div className="pricing-intro">
-          <div className="insight-icon" style={{ background: '#d6eeb9', flex: 'none' }}>
+        <div className="pricing-intro" style={{ background: '#f5faf4', borderColor: '#d0ebd5' }}>
+          <div className="insight-icon" style={{ background: '#d6fb72', color: 'var(--deep)' }}>
             ⇣
           </div>
           <div>
-            <strong>Fórmula de reposición racional</strong>
+            <strong>Compra racional para cuidar tu capital de trabajo</strong>
             <p>
-              <code>Cantidad sugerida = Demanda en plazo de entrega + Stock de seguridad + Demanda comprometida − Stock disponible − Pedidos en camino</code>.
-              Las sugerencias evitan tanto quiebres de producción como sobre-stock perecedero.
+              <code>Cantidad sugerida = Demanda en plazo de entrega + Stock de seguridad + Demanda comprometida − Stock actual − Pedidos en camino</code>.
             </p>
           </div>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1.3fr) minmax(300px, 1fr)',
-            gap: '16px',
-            marginTop: '16px',
-          }}
-        >
-          {/* Purchase suggestion form */}
+        <div className="responsive-split-grid">
           <div style={{ background: '#fbfdfa', border: '1px solid var(--line)', borderRadius: '14px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: '14px' }}>Calculador de orden sugerida</h3>
+            <h3 style={{ margin: '0 0 12px', fontSize: '14px' }}>Calculador de Orden para la Emprendedora</h3>
 
             <label className="field-label" style={{ marginTop: 0 }}>
-              Seleccionar insumo / materia prima
+              Seleccionar materia prima
             </label>
             <select
               className="rate-select"
@@ -109,12 +107,12 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
             >
               {inventory.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.name} ({i.code}) · Existencia actual: {i.currentStock} {i.unit}
+                  {i.name} ({i.code}) · Existencia actual: {i.currentStock} {i.unit} · Costo: {moneyUSD(i.unitCostUSD)}
                 </option>
               ))}
             </select>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '10px', marginTop: '12px' }}>
               <div>
                 <label className="field-label">Demanda en plazo de entrega ({selectedItem?.unit})</label>
                 <input
@@ -139,9 +137,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '10px' }}>
               <div>
-                <label className="field-label">Demanda comprometida ({selectedItem?.unit})</label>
+                <label className="field-label">Pedidos comprometidos ({selectedItem?.unit})</label>
                 <input
                   type="number"
                   min="0"
@@ -165,7 +163,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
             </div>
 
             <div>
-              <label className="field-label">Compras confirmadas en tránsito ({selectedItem?.unit})</label>
+              <label className="field-label">Compras en tránsito / pedidas ({selectedItem?.unit})</label>
               <input
                 type="number"
                 min="0"
@@ -188,14 +186,18 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               </h3>
 
               <div className="price-result" style={{ background: '#ffffff15', marginTop: '6px' }}>
-                <small style={{ color: '#b9d4c1' }}>Cantidad a comprar recomendada</small>
+                <small style={{ color: '#b9d4c1' }}>Cantidad a comprar sugerida</small>
                 <strong style={{ color: 'var(--lime)', fontSize: '26px' }}>
                   {suggestedQty} {selectedItem?.unit}
                 </strong>
-                <small style={{ color: '#b9d4c1' }}>
-                  Presupuesto estimado de orden:{' '}
-                  <b style={{ color: '#fff' }}>{money(estimatedOrderCost, selectedItem?.currency)}</b>
-                </small>
+                <div style={{ marginTop: '4px', borderTop: '1px solid #ffffff20', paddingTop: '6px' }}>
+                  <small style={{ color: '#b9d4c1' }}>
+                    Presupuesto estimado: <b>{moneyUSD(estimatedOrderCostUSD)}</b>
+                  </small>
+                  <strong style={{ color: '#fff', fontSize: '14px', display: 'block', marginTop: '2px' }}>
+                    {moneyVES(estimatedOrderCostVES)}
+                  </strong>
+                </div>
               </div>
 
               <button
@@ -209,19 +211,11 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   fontWeight: 800,
                 }}
                 onClick={() => {
-                  onNotify(`Orden de compra sugerida generada para ${suggestedQty} ${selectedItem?.unit} de ${selectedItem?.name}.`);
+                  onNotify(`Orden de compra sugerida: ${suggestedQty} ${selectedItem?.unit} de ${selectedItem?.name}.`);
                 }}
               >
-                Generar orden de compra borrador
+                Generar Orden de Compra
               </button>
-            </div>
-
-            <div className="card panel">
-              <h4 style={{ margin: '0 0 6px', fontSize: '13px' }}>Política de no-automatización</h4>
-              <p style={{ margin: 0, fontSize: '11px', color: 'var(--muted)', lineHeight: '1.5' }}>
-                El sistema sugiere cantidades calculadas pero nunca ejecuta compras de forma autónoma. Requiere
-                siempre la confirmación del comprador u operador.
-              </p>
             </div>
           </div>
         </div>
@@ -238,9 +232,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   <th>Insumo</th>
                   <th>Stock Actual</th>
                   <th>Mínimo Requerido</th>
-                  <th>Sugerencia de Pedido</th>
-                  <th>CPP Referencia</th>
-                  <th>Costo Estimado</th>
+                  <th>Pedido Sugerido</th>
+                  <th>Presupuesto ($)</th>
+                  <th>Presupuesto (Bs)</th>
                   <th>Acción</th>
                 </tr>
               </thead>
@@ -263,9 +257,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                         {item.needed} {item.unit}
                       </strong>
                     </td>
-                    <td>{money(item.unitCost, item.currency)}</td>
+                    <td>{moneyUSD(item.estCostUSD)}</td>
                     <td>
-                      <b>{money(item.estCost, item.currency)}</b>
+                      <b>{moneyVES(item.estCostVES)}</b>
                     </td>
                     <td>
                       <button
@@ -273,7 +267,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                         style={{ background: '#26785c', color: 'white', border: 0, padding: '5px 10px' }}
                         onClick={() => handleItemSelect(item.id)}
                       >
-                        Analizar
+                        Calcular
                       </button>
                     </td>
                   </tr>
